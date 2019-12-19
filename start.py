@@ -5,9 +5,11 @@
 #
 
 import cv2
+import os
 import glob
+import time
 import numpy as np
-from collections import Counter
+# from collections import Counter
 
 
 
@@ -15,26 +17,25 @@ from collections import Counter
 def detect_circle(img, roi):
     """
     detect circle
-    inpput:
+    input:
         img: gray picture
         roi: Relative position between img and original picture (left_top_x, left_top_y, w, h)
     output:
         bbox of circle
     """
     row, column = img.shape
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(3, 3))
-    img_f = img.copy()
-    img_f = img_f.astype("float")
+    # img_f = img.copy()
+    img = img.astype("float")
     # 1.calculate gradient
     gradient = np.zeros((row, column))
     for x in range(row-1):
         for y in range(column-1):
-            gx = abs(img_f[x+1,y]-img_f[x,y])
-            gy = abs(img_f[x,y+1]-img_f[x,y])
+            gx = abs(img[x+1,y]-img[x,y])
+            gy = abs(img[x,y+1]-img[x,y])
             gradient[x,y] = gx+gy
-    sharp = img_f + 15*gradient
-    sharp = sharp.astype("uint8")
-    sharp = np.where(sharp<0,0,np.where(sharp>255,255,sharp)) #cv::saturate_cast
+    # sharp = img + 15*gradient
+    # sharp = sharp.astype("uint8")
+    # sharp = np.where(sharp<0,0,np.where(sharp>255,255,sharp)) #cv::saturate_cast
     _, gradient_binarization = cv2.threshold(gradient, 1, 255, cv2.THRESH_BINARY)
     # 2. filter gradient
     hg, wg = gradient_binarization.shape
@@ -56,12 +57,12 @@ def detect_circle(img, roi):
                 gradient_binarization[3*i+2, 3*j+1] = 0
                 gradient_binarization[3*i+2, 3*j+2] = 0
     h,w = gradient_binarization.shape
-    gradient_binarization = gradient_binarization.astype("uint8")
-    with open("./gradient.txt", "w") as fp:
-        for i in range(h):
-            for j in range(w):
-                fp.writelines("%03d"%(gradient_binarization[i,j])+" ")
-            fp.writelines("\n")
+    # gradient_binarization = gradient_binarization.astype("uint8")
+    # with open("./gradient.txt", "w") as fp:
+    #     for i in range(h):
+    #         for j in range(w):
+    #             fp.writelines("%03d"%(gradient_binarization[i,j])+" ")
+    #         fp.writelines("\n")
     # 3. build bbox with extreme coordinate
     arg_x = np.argmax(gradient_binarization, 0)
     arg_y = np.argmax(gradient_binarization, 1)
@@ -83,7 +84,8 @@ def detect_circle(img, roi):
             break
     left_top = (left[0]+roi[0], top[1]+roi[1])
     right_bot = (right[0]+roi[0], bot[1]+roi[1])
-    cv2.rectangle(imCrop, left_top, right_bot, (0,255,0), 2)
+    # cv2.rectangle(imCrop, left_top, right_bot, (0,255,0), 2)
+    return (left_top, right_bot)
 
 
 def detect_line(img, lowThreshold):
@@ -94,19 +96,18 @@ def detect_line(img, lowThreshold):
     output:
         linear equation
     """
-    # init parameters
-    ratio = 5
-    kernel_size = 3
-    threshold = 30
-    minLineLength = 10
-    maxLineGap = 10
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(3, 3))
+    # # init parameters
+    # ratio = 5
+    # kernel_size = 3
+    # threshold = 30
+    # minLineLength = 10
+    # maxLineGap = 10
+    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(3, 3))
     detect_edge = cv2.GaussianBlur(img, (3,3), 0)
     detect_edge = cv2.Canny(detect_edge,
                     lowThreshold,
                     lowThreshold*ratio,
                     apertureSize = kernel_size)
-    cv2.imshow("edge", detect_edge)
     dst = cv2.morphologyEx(detect_edge, cv2.MORPH_CLOSE, kernel)
     corner = cv2.cornerHarris(dst, 2, 3, 0.04)
     index = np.where(np.array(corner)>0.01*corner.max())
@@ -117,6 +118,10 @@ def detect_line(img, lowThreshold):
     right_roi   = (790,565,35,35)
     line1_left  = (190,525,25,25)
     line1_right = (730,525,25,25)
+    # left_roi    = (120//2,565//2,35//2,35//2)
+    # right_roi   = (790//2,565//2,35//2,35//2)
+    # line1_left  = (190//2,525//2,25//2,25//2)
+    # line1_right = (730//2,525//2,25//2,25//2)
     h1,h2,w1,w2 = [],[],[],[]
     H1,H2,W1,W2 = [],[],[],[]
     for coor in corner_pixel_coordinate:
@@ -136,31 +141,54 @@ def detect_line(img, lowThreshold):
             line1_right[1]<coor[0]<line1_right[1]+right_roi[3]:
             W2.append(coor[1])
             H2.append(coor[0])
-    coor1 = (min(w1),min(h1))
-    coor2 = (max(w2),min(h2))
+    lines = []
+    coor1 = (min(w1),min(h1)) # (x,y)
+    coor2 = (max(w2),max(h2))
     coor3 = (min(W1),min(H1))
-    coor4 = (max(W2),min(H2))
+    coor4 = (max(W2),max(H2))
     coor5 = (min(W1),min(h1))
-    coor6 = (max(W2),min(h2))
-    cv2.line(imCrop, coor1, coor2, (0,255,0), 2)
-    cv2.line(imCrop, coor3, coor4, (0,255,0), 2)
-    cv2.line(imCrop, coor5, coor3, (0,255,0), 2)
-    cv2.line(imCrop, coor6, coor4, (0,255,0), 2)
+    coor6 = (max(W2),max(h2))
+    lines.append([coor1,coor2])
+    lines.append([coor3,coor4])
+    lines.append([coor5,coor3])
+    lines.append([coor6,coor4])
+    # cv2.line(imCrop, coor1, coor2, (0,255,0), 2)
+    # cv2.line(imCrop, coor3, coor4, (0,255,0), 2)
+    # cv2.line(imCrop, coor5, coor3, (0,255,0), 2)
+    # cv2.line(imCrop, coor6, coor4, (0,255,0), 2)
 
-    imCrop[corner>0.01*corner.max()] = [0,0,255]
+    # imCrop[corner>0.01*corner.max()] = [0,0,255]
 
-    lines = cv2.HoughLinesP(dst, 1, np.pi/180, threshold, minLineLength, maxLineGap)
-    if lines is not None:
-        lines = lines[:,0,:]
-        for x1,y1,x2,y2 in lines:
-            if abs(y1-y2)<10 and abs(x1-x2)>30:
-                cv2.line(imCrop, (x1,y1), (x2,y2), (255,0,0), 2)
-            elif abs(y1-y2)>30 and abs(x1-x2)<10:
-                cv2.line(imCrop, (x1,y1), (x2,y2), (255,0,0), 2)
+    # lines = cv2.HoughLinesP(dst, 1, np.pi/180, threshold, minLineLength, maxLineGap)
+    # if lines is not None:
+    #     lines = lines[:,0,:]
+    #     for x1,y1,x2,y2 in lines:
+    #         if abs(y1-y2)<10 and abs(x1-x2)>30:
+    #             cv2.line(imCrop, (x1,y1), (x2,y2), (255,0,0), 2)
+    #         elif abs(y1-y2)>30 and abs(x1-x2)<10:
+    #             cv2.line(imCrop, (x1,y1), (x2,y2), (255,0,0), 2)
+    return lines
+
+
+def calculate_dis(bbox1, bbox2, lines):
+    # bbox1
+    # if lines[0][0][1] - lines[0][1][1] == 0:
+    dis1_bot   = lines[0][0][1] - bbox1[1][1]
+    dis1_right = bbox1[1][0] - lines[2][0][0]
+    dis1_top   = lines[0][0][1] - bbox1[0][1]
+    dis1_left  = bbox1[0][0] - lines[2][0][0]
+
+    # bbox2
+    dis2_bot   = lines[0][0][1] - bbox2[1][1]
+    dis2_right = lines[3][0][0] - bbox2[1][0]
+    dis2_top   = lines[0][0][1] - bbox2[0][1]
+    dis2_left  = lines[3][0][0] - bbox2[0][0]
+    # print("bbox1: (bot,top,left,right):({},{},{},{})".format(dis1_bot,dis1_top,dis1_left,dis1_right))
+    # print("bbox2: (bot,top,left,right):({},{},{},{})".format(dis2_bot,dis2_top,dis2_left,dis2_right))
 
 
 def detect(lowThreshold):
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(3, 3))   # 定义内核
+    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(3, 3))   # 定义内核
     gray = cv2.cvtColor(imCrop, cv2.COLOR_BGR2GRAY)  # 灰度化
     # showCrosshair = False
     # fromCenter = False
@@ -168,16 +196,21 @@ def detect(lowThreshold):
     # print(r)
     r1 = (240, 455, 70, 75)
     r2 = (635, 455, 70, 75)
+    # r1 = (240//2, 455//2, 70//2, 75//2)
+    # r2 = (635//2, 455//2, 70//2, 75//2)
     ROI_L = gray[int(r1[1]):int(r1[1]+r1[3]), int(r1[0]):int(r1[0]+r1[2])]
     ROI_R = gray[int(r2[1]):int(r2[1]+r2[3]), int(r2[0]):int(r2[0]+r2[2])]
     # detect circle
-    detect_circle(ROI_L, r1)
-    detect_circle(ROI_R, r2)
+    bbox1 = detect_circle(ROI_L, r1)
+    bbox2 = detect_circle(ROI_R, r2)
     # detect line
-    detect_line(gray, lowThreshold)
-    cv2.imwrite("./data/canny.tiff", imCrop)
-    cv2.imshow('canny demo',imCrop)
-    cv2.waitKey(1000)
+    lines = detect_line(gray, lowThreshold)
+    # calculate distance
+    calculate_dis(bbox1, bbox2, lines)
+    # cv2.imwrite("./data/canny.tiff", imCrop)
+    # cv2.imshow('canny demo',imCrop)
+    # cv2.waitKey(1)
+    # cv2.destroyAllWindows()
 
             
 
@@ -185,13 +218,28 @@ if __name__ == "__main__":
     """
     """
     imgs_list = glob.glob("./imgs"+"/*")
+    start = time.time()
+    # init parameters
+    ratio = 5
+    kernel_size = 3
+    threshold = 30
+    minLineLength = 10
+    maxLineGap = 10
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(3, 3))   # 定义内核
     for imgpath in imgs_list:
         img = cv2.imread(imgpath)
-        height, width = img.shape[:2]
-        img = cv2.resize(img, (int(width/2), int(height/2)), interpolation=cv2.INTER_LINEAR)
-        # print("shape: ", img.shape)
 
-        imCrop = img.copy()
+        # img = cv2.imread("./imgs/d_5.tiff")
+        imgname = os.path.basename(imgpath)
+        # print(imgname)
+        height, width = img.shape[:2]
+        imCrop = cv2.resize(img, (int(width/2), int(height/2)), interpolation=cv2.INTER_LINEAR)
+        # imCrop = cv2.resize(img, (int(width/4), int(height/4)), interpolation=cv2.INTER_LINEAR)
+        # print("shape: ", img.shape)
+        # imCrop = img.copy()
         # cv2.createTrackbar('Min threshold','canny demo', lowThreshold, max_lowThreshold, CannyThreshold)
         detect(16)
         # cv2.imshow("a", img)
+
+    end = time.time()
+    print("use time:", end-start)
